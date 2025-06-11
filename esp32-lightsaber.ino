@@ -5,6 +5,7 @@
 #define DATA_PIN 2
 #define BTN1_PIN 4
 #define BTN2_PIN 15
+#define BUZZER_PIN 5
 
 // LED strip
 CRGB leds[NUM_LEDS];
@@ -51,8 +52,10 @@ void loop() {
 
 void btn1_pressed() {
   Serial.println("[DEBUG] Button 1 pressed!");
+  tone(BUZZER_PIN, 400, 150);
 }
 
 void btn2_pressed() {
   Serial.println("[DEBUG] Button 2 pressed!");
+  tone(BUZZER_PIN, 800, 150);
 }
