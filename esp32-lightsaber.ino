@@ -1,3 +1,5 @@
+#include <WiFi.h>
+#include <AsyncMqttClient.h>
 #include <FastLED.h>
 #include "OneButton.h"
 
@@ -13,6 +15,19 @@ CRGB leds[NUM_LEDS];
 // buttons
 OneButton btn1;
 OneButton btn2;
+
+// Wi-Fi credentials
+const char* WIFI_SSID     = "Projeto";
+const char* WIFI_PASSWORD = "2022-11-07";
+
+// MQTT
+AsyncMqttClient mqttClient;
+const char* MQTT_HOST          = "192.168.0.100";
+const uint16_t MQTT_PORT       = 1883;
+const char* MQTT_CLIENT_ID     = "ESP32_Lightsaber";
+const char* MQTT_LOGIN         = "mqttuser";
+const char* MQTT_PASSWORD      = "1234";
+const char* MQTT_TOPIC_GESTURE = "esp32/saber/gesture";
 
 // time for led color change
 unsigned long last_led_time = 0;
@@ -114,6 +129,35 @@ void lightsaber_toggle_blink() {
   }
 }
 
+// wifi events
+void on_wifi_connected(WiFiEvent_t, WiFiEventInfo_t) {
+  Serial.println("[DEBUG] WiFi connected");
+
+  mqttClient.connect();
+}
+void on_wifi_disconnected(WiFiEvent_t, WiFiEventInfo_t) {
+  Serial.println("[DEBUG] WiFi disconnected, retrying..");
+
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+}
+
+// mqtt events
+void on_mqtt_connected(bool sessionPresent) {
+  Serial.println("[DEBUG] MQTT connected");
+}
+void on_mqtt_disconnected(AsyncMqttClientDisconnectReason reason) {
+  Serial.print("[DEBUG] MQTT disconnected, retrying..");
+
+  mqttClient.connect();
+}
+
+// max evt 64 chars!
+void publish_event(const char* topic, const char* evt) {
+  char buf[64];
+  snprintf(buf, sizeof(buf), "{\"event\":\"%s\",\"ts\":%lu}", evt, millis());
+  mqttClient.publish(topic, 1, false, buf);
+}
+
 void setup() {
   Serial.begin(115200);
 
@@ -127,6 +171,19 @@ void setup() {
   btn2.setup(BTN2_PIN, INPUT, false);
   btn1.attachClick(btn1_pressed);
   btn2.attachClick(btn2_pressed);
+
+  // mqtt
+  mqttClient.onConnect(on_mqtt_connected);
+  mqttClient.onDisconnect(on_mqtt_disconnected);
+  mqttClient.setServer(MQTT_HOST, MQTT_PORT);
+  mqttClient.setCredentials(MQTT_LOGIN, MQTT_PASSWORD);
+  mqttClient.setClientId(MQTT_CLIENT_ID);
+
+  // wifi
+  WiFi.onEvent(on_wifi_connected, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_GOT_IP);
+  WiFi.onEvent(on_wifi_disconnected, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+  // connect to wifi, which will then connect to mqtt
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 }
 
 void loop() {
@@ -171,6 +228,9 @@ void btn1_pressed() {
     nullptr,
     1
   );
+
+  // test example
+  publish_event(MQTT_TOPIC_GESTURE, "gesture-kitchen-lights");
 }
 
 void btn2_pressed() {
