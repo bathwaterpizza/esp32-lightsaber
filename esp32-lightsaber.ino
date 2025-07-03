@@ -1,6 +1,7 @@
 #include <WiFi.h>
 #include <AsyncMqttClient.h>
 #include <FastLED.h>
+#include <DFMiniMp3.h>
 #include "OneButton.h"
 
 #define NUM_LEDS 20
@@ -8,6 +9,8 @@
 #define BTN1_PIN 4
 #define BTN2_PIN 15
 #define BUZZER_PIN 5
+#define RX_PIN 26
+#define TX_PIN 27
 
 // LED strip
 CRGB leds[NUM_LEDS];
@@ -29,11 +32,68 @@ const char* MQTT_LOGIN         = "mqttuser";
 const char* MQTT_PASSWORD      = "1234";
 const char* MQTT_TOPIC_GESTURE = "esp32/saber/gesture";
 
-// time for led color change
-unsigned long last_led_time = 0;
+// DFPlayer Mini
+HardwareSerial mp3Serial(2);
+class Mp3Notify;
+typedef DFMiniMp3<HardwareSerial, Mp3Notify> DfMp3; 
+DfMp3 dfmp3(mp3Serial);
 
 // tasks
 TaskHandle_t blink_task_handler = nullptr;
+
+class Mp3Notify
+{
+public:
+  static void PrintlnSourceAction(DfMp3_PlaySources source, const char* action)
+  {
+    if (source & DfMp3_PlaySources_Sd) 
+    {
+        Serial.print("SD Card, ");
+    }
+    if (source & DfMp3_PlaySources_Usb) 
+    {
+        Serial.print("USB Disk, ");
+    }
+    if (source & DfMp3_PlaySources_Flash) 
+    {
+        Serial.print("Flash, ");
+    }
+    Serial.println(action);
+  }
+  static void OnError([[maybe_unused]] DfMp3& mp3, uint16_t errorCode)
+  {
+    // see DfMp3_Error for code meaning
+    Serial.println();
+    Serial.print("Com Error ");
+    Serial.println(errorCode);
+  }
+  static void OnPlayFinished([[maybe_unused]] DfMp3& mp3, [[maybe_unused]] DfMp3_PlaySources source, uint16_t track)
+  {
+    Serial.print("Play finished for #");
+    Serial.println(track);  
+
+    // start next track
+    track += 1;
+    // this example will just start back over with 1 after track 1
+    if (track > 1) 
+    {
+      track = 1;
+    }
+    dfmp3.playMp3FolderTrack(track);  // sd:/mp3/0001.mp3, sd:/mp3/0002.mp3, sd:/mp3/0003.mp3
+  }
+  static void OnPlaySourceOnline([[maybe_unused]] DfMp3& mp3, DfMp3_PlaySources source)
+  {
+    PrintlnSourceAction(source, "online");
+  }
+  static void OnPlaySourceInserted([[maybe_unused]] DfMp3& mp3, DfMp3_PlaySources source)
+  {
+    PrintlnSourceAction(source, "inserted");
+  }
+  static void OnPlaySourceRemoved([[maybe_unused]] DfMp3& mp3, DfMp3_PlaySources source)
+  {
+    PrintlnSourceAction(source, "removed");
+  }
+};
 
 void lightsaber_on_off_anim_task(void*) {
   const TickType_t interval = pdMS_TO_TICKS(40);
@@ -172,6 +232,15 @@ void setup() {
   btn1.attachClick(btn1_pressed);
   btn2.attachClick(btn2_pressed);
 
+  // DFPlayer Mini
+  mp3Serial.begin(9600, SERIAL_8N1, RX_PIN, TX_PIN);
+  dfmp3.begin(); // RX, TX
+  dfmp3.reset();
+  delay(300);
+  dfmp3.setVolume(30);
+  // test: play track 1
+  dfmp3.playMp3FolderTrack(1); // sd:/mp3/0001.mp3
+
   // mqtt
   mqttClient.onConnect(on_mqtt_connected);
   mqttClient.onDisconnect(on_mqtt_disconnected);
@@ -189,21 +258,12 @@ void setup() {
 void loop() {
   unsigned long current_time = millis();
 
-  // check button presses
+  // check button events
   btn1.tick();
   btn2.tick();
 
-  // set a random color on each LED every 200ms
-  /*
-  if (current_time - last_led_time > 200) {
-    for (int i = 0; i < NUM_LEDS; i++) {
-      leds[i] = CHSV(random8(), 255, 255);
-    }
-    FastLED.show();
-
-    last_led_time = current_time;
-  }
-  */
+  // check DFPlayer Mini events
+  dfmp3.loop();
 }
 
 void btn1_pressed() {
