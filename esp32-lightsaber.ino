@@ -4,18 +4,14 @@
 #include <DFMiniMp3.h>
 #include "OneButton.h"
 
-#define NUM_LEDS 20
-#define DATA_PIN 2
-#define BTN1_PIN 4
-#define BTN2_PIN 15
-#define BUZZER_PIN 5
-#define RX_PIN 26
-#define TX_PIN 27
-
 // LED strip
+#define NUM_LEDS 20BUZZ
+#define LED_DATA_PIN 2
 CRGB leds[NUM_LEDS];
 
 // buttons
+#define BTN1_PIN 4
+#define BTN2_PIN 15
 OneButton btn1;
 OneButton btn2;
 
@@ -33,6 +29,8 @@ const char* MQTT_PASSWORD      = "1234";
 const char* MQTT_TOPIC_GESTURE = "esp32/saber/gesture";
 
 // DFPlayer Mini
+#define DFPLAYER_RX_PIN 26
+#define DFPLAYER_TX_PIN 27
 HardwareSerial mp3Serial(2);
 class Mp3Notify;
 typedef DFMiniMp3<HardwareSerial, Mp3Notify> DfMp3; 
@@ -41,6 +39,12 @@ DfMp3 dfmp3(mp3Serial);
 // tasks
 TaskHandle_t blink_task_handler = nullptr;
 
+// MPU6050 IMU
+#define IMU_INT_PIN 25
+#define IMU_SCL_PIN 22
+#define IMU_SDA_PIN 21
+
+// DFPlayer Mini event handlers
 class Mp3Notify
 {
 public:
@@ -137,37 +141,6 @@ void lightsaber_blink_anim_task(void*) {
   }
 }
 
-void lightsaber_on_off_sound_task(void*) {
-  const uint16_t min_freq = 200;
-  const uint16_t max_freq = 1200;
-  const TickType_t on_time = pdMS_TO_TICKS(800);
-  const TickType_t off_time = pdMS_TO_TICKS(200);
-  const uint8_t steps = 20;
-  const TickType_t step_delay = on_time / steps;
-
-  // up
-  for (uint8_t i = 0; i <= steps; i++) {
-    uint16_t freq = min_freq + (uint32_t)(max_freq - min_freq) * i / steps;
-    tone(BUZZER_PIN, freq);
-    vTaskDelay(step_delay);
-  }
-
-  // wait
-  noTone(BUZZER_PIN);
-  vTaskDelay(off_time);
-
-  // down
-  for (uint8_t i = steps; i > 0; i--) {
-    uint16_t freq = min_freq + (uint32_t)(max_freq - min_freq) * i / steps;
-    tone(BUZZER_PIN, freq);
-    vTaskDelay(step_delay);
-  }
-
-  // off
-  noTone(BUZZER_PIN);
-  vTaskDelete(nullptr);
-}
-
 void lightsaber_toggle_blink() {
   if (blink_task_handler) {
     vTaskDelete(blink_task_handler);
@@ -222,7 +195,7 @@ void setup() {
   Serial.begin(115200);
 
   // init LED strip
-  FastLED.addLeds<WS2812B, DATA_PIN, GRB>(leds, NUM_LEDS);
+  FastLED.addLeds<WS2812B, LED_DATA_PIN, GRB>(leds, NUM_LEDS);
   FastLED.setBrightness(255);
   FastLED.setMaxPowerInVoltsAndMilliamps(5, 500); // breadboard safe
 
@@ -232,8 +205,8 @@ void setup() {
   btn1.attachClick(btn1_pressed);
   btn2.attachClick(btn2_pressed);
 
-  // DFPlayer Mini
-  mp3Serial.begin(9600, SERIAL_8N1, RX_PIN, TX_PIN);
+  // init DFPlayer Mini
+  mp3Serial.begin(9600, SERIAL_8N1, DFPLAYER_RX_PIN, DFPLAYER_TX_PIN);
   dfmp3.begin(); // RX, TX
   dfmp3.reset();
   delay(300);
@@ -241,14 +214,14 @@ void setup() {
   // test: play track 1
   dfmp3.playMp3FolderTrack(1); // sd:/mp3/0001.mp3
 
-  // mqtt
+  // init MQTT
   mqttClient.onConnect(on_mqtt_connected);
   mqttClient.onDisconnect(on_mqtt_disconnected);
   mqttClient.setServer(MQTT_HOST, MQTT_PORT);
   mqttClient.setCredentials(MQTT_LOGIN, MQTT_PASSWORD);
   mqttClient.setClientId(MQTT_CLIENT_ID);
 
-  // wifi
+  // init Wi-Fi
   WiFi.onEvent(on_wifi_connected, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_GOT_IP);
   WiFi.onEvent(on_wifi_disconnected, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
   // connect to wifi, which will then connect to mqtt
@@ -268,7 +241,6 @@ void loop() {
 
 void btn1_pressed() {
   Serial.println("[DEBUG] Button 1 pressed!");
-  tone(BUZZER_PIN, 400, 150);
 
   xTaskCreatePinnedToCore(
     lightsaber_on_off_anim_task,
@@ -279,18 +251,9 @@ void btn1_pressed() {
     nullptr,
     1
   );
-  xTaskCreatePinnedToCore(
-    lightsaber_on_off_sound_task,
-    "OnOffSound",
-    2048,
-    nullptr,
-    tskIDLE_PRIORITY + 1,
-    nullptr,
-    1
-  );
 
   // test example
-  publish_event(MQTT_TOPIC_GESTURE, "gesture-kitchen-lights");
+  //publish_event(MQTT_TOPIC_GESTURE, "gesture-kitchen-lights");
 }
 
 void btn2_pressed() {
