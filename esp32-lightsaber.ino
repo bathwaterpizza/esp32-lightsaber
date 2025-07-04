@@ -5,8 +5,8 @@
 #include "OneButton.h"
 
 // LED strip
-#define NUM_LEDS 20BUZZ
-#define LED_DATA_PIN 2
+#define NUM_LEDS 20
+#define LED_DATA_PIN 18
 CRGB leds[NUM_LEDS];
 
 // buttons
