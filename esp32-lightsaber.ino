@@ -128,8 +128,7 @@ void lightsaber_blink_anim_task(void*) {
     vTaskDelay(onTime);
 
     // all off
-    fill_solid(leds, NUM_LEDS, CRGB::Black);
-    FastLED.show();
+    FastLED.clear(true);
     vTaskDelay(offTime);
   }
 }
@@ -140,8 +139,7 @@ void lightsaber_toggle_blink() {
     blink_task_handler = nullptr;
 
     // turn off leds
-    fill_solid(leds, NUM_LEDS, CRGB::Black);
-    FastLED.show();
+    FastLED.clear(true);
   } else {
     xTaskCreatePinnedToCore(
       lightsaber_blink_anim_task,
