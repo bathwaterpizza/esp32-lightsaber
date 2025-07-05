@@ -2,7 +2,10 @@
 #include <AsyncMqttClient.h>
 #include <FastLED.h>
 #include <DFMiniMp3.h>
-#include "OneButton.h"
+#include <OneButton.h>
+
+// debug options
+#define ENABLE_NETWORKING 0
 
 // LED strip
 #define NUM_LEDS 20
@@ -52,38 +55,28 @@ public:
   {
     if (source & DfMp3_PlaySources_Sd) 
     {
-        Serial.print("SD Card, ");
+        Serial.print("[DEBUG] DFPlayer SD Card, ");
     }
     if (source & DfMp3_PlaySources_Usb) 
     {
-        Serial.print("USB Disk, ");
+        Serial.print("[DEBUG] DFPlayer USB Disk, ");
     }
     if (source & DfMp3_PlaySources_Flash) 
     {
-        Serial.print("Flash, ");
+        Serial.print("[DEBUG] DFPlayer Flash, ");
     }
     Serial.println(action);
   }
   static void OnError([[maybe_unused]] DfMp3& mp3, uint16_t errorCode)
   {
-    // see DfMp3_Error for code meaning
     Serial.println();
-    Serial.print("Com Error ");
+    Serial.print("[DEBUG] DFPlayer Com Error ");
     Serial.println(errorCode);
   }
   static void OnPlayFinished([[maybe_unused]] DfMp3& mp3, [[maybe_unused]] DfMp3_PlaySources source, uint16_t track)
   {
-    Serial.print("Play finished for #");
-    Serial.println(track);  
-
-    // start next track
-    track += 1;
-    // this example will just start back over with 1 after track 1
-    if (track > 1) 
-    {
-      track = 1;
-    }
-    dfmp3.playMp3FolderTrack(track);  // sd:/mp3/0001.mp3, sd:/mp3/0002.mp3, sd:/mp3/0003.mp3
+    Serial.print("[DEBUG] DFPlayer finished playing #");
+    Serial.println(track);
   }
   static void OnPlaySourceOnline([[maybe_unused]] DfMp3& mp3, DfMp3_PlaySources source)
   {
@@ -157,7 +150,7 @@ void lightsaber_toggle_blink() {
       nullptr,
       tskIDLE_PRIORITY + 1,
       &blink_task_handler,
-      1
+      0
     );
   }
 }
@@ -197,7 +190,7 @@ void setup() {
   // init LED strip
   FastLED.addLeds<WS2812B, LED_DATA_PIN, GRB>(leds, NUM_LEDS);
   FastLED.setBrightness(255);
-  FastLED.setMaxPowerInVoltsAndMilliamps(5, 500); // breadboard safe
+  //FastLED.setMaxPowerInVoltsAndMilliamps(5, 500); // breadboard safe
 
   // init buttons
   btn1.setup(BTN1_PIN, INPUT, false);
@@ -214,6 +207,7 @@ void setup() {
   // test: play track 1
   dfmp3.playMp3FolderTrack(1); // sd:/mp3/0001.mp3
 
+#if ENABLE_NETWORKING
   // init MQTT
   mqttClient.onConnect(on_mqtt_connected);
   mqttClient.onDisconnect(on_mqtt_disconnected);
@@ -226,6 +220,7 @@ void setup() {
   WiFi.onEvent(on_wifi_disconnected, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
   // connect to wifi, which will then connect to mqtt
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+#endif
 }
 
 void loop() {
@@ -249,7 +244,7 @@ void btn1_pressed() {
     nullptr,
     tskIDLE_PRIORITY + 1,
     nullptr,
-    1
+    0
   );
 
   // test example
