@@ -55,27 +55,27 @@ public:
   {
     if (source & DfMp3_PlaySources_Sd) 
     {
-        Serial.print("[DEBUG] DFPlayer SD Card, ");
+        Serial.print(F("[DEBUG] DFPlayer SD Card, "));
     }
     if (source & DfMp3_PlaySources_Usb) 
     {
-        Serial.print("[DEBUG] DFPlayer USB Disk, ");
+        Serial.print(F("[DEBUG] DFPlayer USB Disk, "));
     }
     if (source & DfMp3_PlaySources_Flash) 
     {
-        Serial.print("[DEBUG] DFPlayer Flash, ");
+        Serial.print(F("[DEBUG] DFPlayer Flash, "));
     }
     Serial.println(action);
   }
   static void OnError([[maybe_unused]] DfMp3& mp3, uint16_t errorCode)
   {
     Serial.println();
-    Serial.print("[DEBUG] DFPlayer Com Error ");
+    Serial.print(F("[DEBUG] DFPlayer Com Error "));
     Serial.println(errorCode);
   }
   static void OnPlayFinished([[maybe_unused]] DfMp3& mp3, [[maybe_unused]] DfMp3_PlaySources source, uint16_t track)
   {
-    Serial.print("[DEBUG] DFPlayer finished playing #");
+    Serial.print(F("[DEBUG] DFPlayer finished playing #"));
     Serial.println(track);
   }
   static void OnPlaySourceOnline([[maybe_unused]] DfMp3& mp3, DfMp3_PlaySources source)
@@ -157,22 +157,22 @@ void lightsaber_toggle_blink() {
 
 // wifi events
 void on_wifi_connected(WiFiEvent_t, WiFiEventInfo_t) {
-  Serial.println("[DEBUG] WiFi connected");
+  Serial.println(F("[DEBUG] WiFi connected"));
 
   mqttClient.connect();
 }
 void on_wifi_disconnected(WiFiEvent_t, WiFiEventInfo_t) {
-  Serial.println("[DEBUG] WiFi disconnected, retrying..");
+  Serial.println(F("[DEBUG] WiFi disconnected, retrying.."));
 
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 }
 
 // mqtt events
 void on_mqtt_connected(bool sessionPresent) {
-  Serial.println("[DEBUG] MQTT connected");
+  Serial.println(F("[DEBUG] MQTT connected"));
 }
 void on_mqtt_disconnected(AsyncMqttClientDisconnectReason reason) {
-  Serial.print("[DEBUG] MQTT disconnected, retrying..");
+  Serial.print(F("[DEBUG] MQTT disconnected, retrying.."));
 
   mqttClient.connect();
 }
@@ -235,7 +235,7 @@ void loop() {
 }
 
 void btn1_pressed() {
-  Serial.println("[DEBUG] Button 1 pressed!");
+  Serial.println(F("[DEBUG] Button 1 pressed!"));
 
   xTaskCreatePinnedToCore(
     lightsaber_on_off_anim_task,
@@ -252,7 +252,7 @@ void btn1_pressed() {
 }
 
 void btn2_pressed() {
-  Serial.println("[DEBUG] Button 2 pressed!");
+  Serial.println(F("[DEBUG] Button 2 pressed!"));
 
   lightsaber_toggle_blink();
 }
