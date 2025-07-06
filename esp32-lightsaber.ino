@@ -344,9 +344,7 @@ void loop() {
   }
 }
 
-// -----------------------------------------------------------------------------
-//  Debug helper: read /data.json from LittleFS and pretty-print to Serial
-// -----------------------------------------------------------------------------
+// read /data.json from LittleFS and print to Serial
 void debug_print_stored_gestures()
 {
   if (!LittleFS.exists("/data.json")) {
