@@ -277,7 +277,8 @@ void loop() {
 
     if (now - lastGestureTime > GESTURE_DEBOUNCE_MS) {  // gesture cooldown time
       if (abs(ax) > GESTURE_THRESHOLD || abs(ay) > GESTURE_THRESHOLD || abs(az) > GESTURE_THRESHOLD) {
-        dfmp3.playMp3FolderTrack(random(2, 6)); // play random lightsaber swing sound effect
+        // play random lightsaber swing sound effect, ignore 5s of startup time
+        if (millis() > 5000UL) dfmp3.playMp3FolderTrack(random(2, 6));
 
         String gesture;
         if (abs(ax) >= abs(ay) && abs(ax) >= abs(az)) {
