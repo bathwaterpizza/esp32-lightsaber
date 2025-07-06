@@ -226,8 +226,9 @@ void setup() {
   dfmp3.reset();
   delay(300);
   dfmp3.setVolume(30);
+
   // play lightsaber on sound effect
-  dfmp3.playMp3FolderTrack(1);
+  if (millis() > 10000UL) dfmp3.playMp3FolderTrack(1);
 
   // --- init IMU ---
   Wire.begin();                       
@@ -310,6 +311,8 @@ void loop() {
 
     if (now - lastGestureTime > GESTURE_DEBOUNCE_MS) {  // gesture cooldown time
       if (abs(ax) > GESTURE_THRESHOLD || abs(ay) > GESTURE_THRESHOLD || abs(az) > GESTURE_THRESHOLD) {
+        dfmp3.playMp3FolderTrack(random(2, 6)); // play random lightsaber swing sound effect
+
         String gesture;
         if (abs(ax) >= abs(ay) && abs(ax) >= abs(az)) {
           gesture = (ax > 0 ? "Forward" : "Backward");
@@ -318,6 +321,7 @@ void loop() {
         } else {
           gesture = (az > 0 ? "Up" : "Down");
         }
+
         Serial.println(String("Gesture detected: ") + gesture);
         lastGestureTime = now;
       }
