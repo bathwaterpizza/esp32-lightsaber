@@ -21,7 +21,7 @@ CRGB leds[NUM_LEDS];
 OneButton btn1;
 OneButton btn2;
 
-// -- WiFi credentials ---
+// --- WiFi credentials ---
 const char* WIFI_SSID     = "Projeto";
 const char* WIFI_PASSWORD = "2022-11-07";
 
@@ -64,6 +64,7 @@ VectorFloat gravity;
 
 // Gesture detection parameters
 const int16_t GESTURE_THRESHOLD = 8000;  // ~0.5g threshold (tune as needed)
+const int GESTURE_DEBOUNCE_MS = 300; // ignore motion interrupts for 300ms after detection
 unsigned long lastGestureTime = 0;
 
 // DFPlayer Mini event handlers
@@ -247,9 +248,9 @@ void setup() {
     attachInterrupt(digitalPinToInterrupt(IMU_INT_PIN), dmpDataReady, RISING);
     packetSize = mpu.dmpGetFIFOPacketSize();
     dmpReady = true;
-    Serial.println("MPU6050 DMP initialized.");
+    Serial.println(F("[DEBUG] MPU6050 DMP initialized."));
   } else {
-    Serial.print("DMP init failed (code "); Serial.print(devStatus); Serial.println(")");
+    Serial.print(F("[DEBUG] DMP init failed (code ")); Serial.print(devStatus); Serial.println(F(")"));
   }
 
 #if ENABLE_NETWORKING
@@ -283,7 +284,7 @@ void loop() {
     // Read FIFO packet
     uint16_t fifoCount = mpu.getFIFOCount();
     if (fifoCount == 1024) {
-      Serial.println("[DEBUG] MPU6050 FIFO Overflow!");
+      Serial.println(F("[DEBUG] MPU6050 FIFO Overflow!"));
       mpu.resetFIFO();  // FIFO overflow, reset
       return;
     }
@@ -293,18 +294,21 @@ void loop() {
       mpu.getFIFOBytes(fifoBuffer, packetSize);
       fifoCount -= packetSize;
     }
+
     // Get DMP data
     mpu.dmpGetQuaternion(&q, fifoBuffer);
     mpu.dmpGetAccel(&aa, fifoBuffer);
     mpu.dmpGetGravity(&gravity, &q);
     mpu.dmpGetLinearAccel(&aaReal, &aa, &gravity);
     mpu.dmpGetLinearAccelInWorld(&aaWorld, &aaReal, &q);
+
     // Check for gesture
     int16_t ax = aaWorld.x;
     int16_t ay = aaWorld.y;
     int16_t az = aaWorld.z;
     unsigned long now = millis();
-    if (now - lastGestureTime > 300) {  // 300ms debounce
+
+    if (now - lastGestureTime > GESTURE_DEBOUNCE_MS) {  // gesture cooldown time
       if (abs(ax) > GESTURE_THRESHOLD || abs(ay) > GESTURE_THRESHOLD || abs(az) > GESTURE_THRESHOLD) {
         String gesture;
         if (abs(ax) >= abs(ay) && abs(ax) >= abs(az)) {
