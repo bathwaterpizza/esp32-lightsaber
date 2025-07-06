@@ -1,0 +1,24 @@
+[
+	{
+		"name": "gesture1",
+		"color": "red",
+		"gestures": [
+			"up",
+			"down",
+			"left"
+		]
+	},
+	{
+		"name": "gesture2",
+		"color": "blue",
+		"gestures": [
+			"forward",
+			"backward",
+			"forward",
+			"left",
+			"down",
+			"up",
+			"forward"
+		]
+	}
+]

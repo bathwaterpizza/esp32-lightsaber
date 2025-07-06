@@ -8,6 +8,7 @@
 #include <MPU6050_6Axis_MotionApps612.h>
 #include <ArduinoJson.h>
 #include <vector>
+#include <LittleFS.h>
 
 // --- debug options ---
 #define ENABLE_NETWORKING 0
@@ -24,12 +25,12 @@ OneButton btn1;
 OneButton btn2;
 
 // --- WiFi credentials ---
-const char* WIFI_SSID     = "Projeto";
-const char* WIFI_PASSWORD = "2022-11-07";
+const char* WIFI_SSID     = "Peres";
+const char* WIFI_PASSWORD = "pan13DKs48";
 
 // --- MQTT ---
 AsyncMqttClient mqttClient;
-const char* MQTT_HOST      = "192.168.0.100";
+const char* MQTT_HOST      = "broker.mqtt.cool";
 const uint16_t MQTT_PORT   = 1883;
 const char* MQTT_CLIENT_ID = "ESP32_Lightsaber";
 const char* MQTT_LOGIN     = "mqttuser";
@@ -123,6 +124,28 @@ public:
   }
 };
 
+// helper to save gestures json to flash
+bool save_gestures_to_flash(const uint8_t* payload, size_t len) {
+  StaticJsonDocument<256> probe;
+  DeserializationError err = deserializeJson(probe, payload, len);
+  if (err) {
+    Serial.print(F("[DEBUG] JSON parse error: ")); Serial.println(err.c_str());
+    return false;
+  }
+
+  File f = LittleFS.open("/data.json", "w");
+  if (!f) {
+    Serial.println(F("[DEBUG] LittleFS open failed"));
+    return false;
+  }
+
+  f.write(payload, len);
+  f.close();
+
+  Serial.println(F("[DEBUG] New gesture list saved to /data.json"));
+  return true;
+}
+
 void lightsaber_on_anim_task(void*) {
   const TickType_t interval = pdMS_TO_TICKS(40);
 
@@ -152,15 +175,35 @@ void on_wifi_disconnected(WiFiEvent_t, WiFiEventInfo_t) {
 // --- MQTT events ---
 void on_mqtt_connected(bool sessionPresent) {
   Serial.println(F("[DEBUG] MQTT connected"));
+
+  // subscribe to receive gesture list updates
+  mqttClient.subscribe(MQTT_TOPIC_GET_GESTURES, 1);
 }
 void on_mqtt_disconnected(AsyncMqttClientDisconnectReason reason) {
   Serial.print(F("[DEBUG] MQTT disconnected, retrying.."));
 
   mqttClient.connect();
 }
+void on_mqtt_data(char* topic, char* payload,
+                  AsyncMqttClientMessageProperties,
+                  size_t len, size_t, size_t) {
+  // check if it's the gesture list update topic
+  if (strcmp(topic, MQTT_TOPIC_GET_GESTURES) != 0) return;
+
+  Serial.print(F("[DEBUG] MQTT received gesture list update. Payload len="));
+  Serial.println(len);
+  save_gestures_to_flash((uint8_t*)payload, len);
+}
 
 void setup() {
   Serial.begin(115200);
+
+  // --- init LittleFS ---
+  if (!LittleFS.begin()) {
+    Serial.println(F("[DEBUG] LittleFS mount failed, formatting…"));
+    LittleFS.format();
+    LittleFS.begin();
+  }
 
   // --- init LED strip ---
   FastLED.addLeds<WS2812B, LED_DATA_PIN, GRB>(leds, NUM_LEDS);
@@ -196,7 +239,7 @@ void setup() {
     0
   );
 
-  // --- init IMU ---
+  // --- init MPU6050 IMU + DMP ---
   Wire.begin();                       
   mpu.initialize();
   
@@ -224,6 +267,7 @@ void setup() {
   // --- init MQTT ---
   mqttClient.onConnect(on_mqtt_connected);
   mqttClient.onDisconnect(on_mqtt_disconnected);
+  mqttClient.onMessage(on_mqtt_data);
   mqttClient.setServer(MQTT_HOST, MQTT_PORT);
   mqttClient.setCredentials(MQTT_LOGIN, MQTT_PASSWORD);
   mqttClient.setClientId(MQTT_CLIENT_ID);
@@ -277,8 +321,8 @@ void loop() {
 
     if (now - lastGestureTime > GESTURE_DEBOUNCE_MS) {  // gesture cooldown time
       if (abs(ax) > GESTURE_THRESHOLD || abs(ay) > GESTURE_THRESHOLD || abs(az) > GESTURE_THRESHOLD) {
-        // play random lightsaber swing sound effect, ignore 5s of startup time
-        if (millis() > 5000UL) dfmp3.playMp3FolderTrack(random(2, 6));
+        // play random lightsaber swing sound effect
+        if (recordingNewGesture) dfmp3.playMp3FolderTrack(random(2, 6));
 
         String gesture;
         if (abs(ax) >= abs(ay) && abs(ax) >= abs(az)) {
@@ -300,6 +344,39 @@ void loop() {
   }
 }
 
+// -----------------------------------------------------------------------------
+//  Debug helper: read /data.json from LittleFS and pretty-print to Serial
+// -----------------------------------------------------------------------------
+void debug_print_stored_gestures()
+{
+  if (!LittleFS.exists("/data.json")) {
+    Serial.println(F("[DEBUG] /data.json not found"));
+    return;
+  }
+
+  File f = LittleFS.open("/data.json", "r");
+  if (!f) {
+    Serial.println(F("[DEBUG] Failed to open /data.json"));
+    return;
+  }
+
+  // Use a sufficiently large document; 4 KB fits ~1200-byte JSON comfortably
+  StaticJsonDocument<4096> doc;
+  DeserializationError err = deserializeJson(doc, f);
+  f.close();
+
+  if (err) {
+    Serial.print  (F("[DEBUG] JSON parse error: "));
+    Serial.println(err.c_str());
+    return;
+  }
+
+  Serial.println(F("----- Stored gesture library -----"));
+  serializeJsonPretty(doc, Serial);          // nicely indented output
+  Serial.println();                          // final newline
+  Serial.println(F("-----------------------------------"));
+}
+
 // --- OneButton events ---
 void btn1_pressed() {
   Serial.println(F("[DEBUG] Button 1 pressed!"));
@@ -310,6 +387,9 @@ void btn1_pressed() {
 
 void btn2_pressed() {
   Serial.println(F("[DEBUG] Button 2 pressed!"));
+
+  // debug
+  debug_print_stored_gestures();
 }
 
 void btn1_released() {
