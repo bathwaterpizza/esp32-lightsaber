@@ -7,25 +7,25 @@
 #include <I2Cdev.h>
 #include <MPU6050_6Axis_MotionApps612.h>
 
-// debug options
+// --- debug options ---
 #define ENABLE_NETWORKING 0
 
-// LED strip
+// --- LED strip ---
 #define NUM_LEDS 20
 #define LED_DATA_PIN 18
 CRGB leds[NUM_LEDS];
 
-// buttons
+// --- buttons ---
 #define BTN1_PIN 4
 #define BTN2_PIN 15
 OneButton btn1;
 OneButton btn2;
 
-// Wi-Fi credentials
+// -- WiFi credentials ---
 const char* WIFI_SSID     = "Projeto";
 const char* WIFI_PASSWORD = "2022-11-07";
 
-// MQTT
+// --- MQTT ---
 AsyncMqttClient mqttClient;
 const char* MQTT_HOST          = "192.168.0.100";
 const uint16_t MQTT_PORT       = 1883;
@@ -34,7 +34,7 @@ const char* MQTT_LOGIN         = "mqttuser";
 const char* MQTT_PASSWORD      = "1234";
 const char* MQTT_TOPIC_GESTURE = "esp32/saber/gesture";
 
-// DFPlayer Mini
+// --- DFPlayer Mini ---
 #define DFPLAYER_RX_PIN 26
 #define DFPLAYER_TX_PIN 27
 HardwareSerial mp3Serial(2);
@@ -42,10 +42,10 @@ class Mp3Notify;
 typedef DFMiniMp3<HardwareSerial, Mp3Notify> DfMp3; 
 DfMp3 dfmp3(mp3Serial);
 
-// tasks
+// --- Tasks ---
 TaskHandle_t blink_task_handler = nullptr;
 
-// MPU6050 IMU
+// --- MPU6050 IMU + DMP Config ---
 #define IMU_INT_PIN 25
 #define IMU_SCL_PIN 22
 #define IMU_SDA_PIN 21
@@ -172,7 +172,7 @@ void lightsaber_toggle_blink() {
   }
 }
 
-// wifi events
+// --- WiFi events ---
 void on_wifi_connected(WiFiEvent_t, WiFiEventInfo_t) {
   Serial.println(F("[DEBUG] WiFi connected"));
 
@@ -184,7 +184,7 @@ void on_wifi_disconnected(WiFiEvent_t, WiFiEventInfo_t) {
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 }
 
-// mqtt events
+// --- MQTT events ---
 void on_mqtt_connected(bool sessionPresent) {
   Serial.println(F("[DEBUG] MQTT connected"));
 }
@@ -204,27 +204,31 @@ void publish_event(const char* topic, const char* evt) {
 void setup() {
   Serial.begin(115200);
 
-  // init LED strip
+  // --- init LED strip ---
   FastLED.addLeds<WS2812B, LED_DATA_PIN, GRB>(leds, NUM_LEDS);
   FastLED.setBrightness(255);
   //FastLED.setMaxPowerInVoltsAndMilliamps(5, 500); // breadboard safe
 
-  // init buttons
+  // --- init buttons ---
   btn1.setup(BTN1_PIN, INPUT, false);
   btn2.setup(BTN2_PIN, INPUT, false);
-  btn1.attachClick(btn1_pressed);
-  btn2.attachClick(btn2_pressed);
+  btn1.setPressMs(0);
+  btn2.setPressMs(0);
+  btn1.attachLongPressStart(btn1_pressed);
+  btn2.attachLongPressStart(btn2_pressed);
+  btn1.attachLongPressStop(btn1_released);
+  btn2.attachLongPressStop(btn2_released);
 
-  // init DFPlayer Mini
+  // --- init DFPlayer Mini ---
   mp3Serial.begin(9600, SERIAL_8N1, DFPLAYER_RX_PIN, DFPLAYER_TX_PIN);
   dfmp3.begin(); // RX, TX
   dfmp3.reset();
   delay(300);
   dfmp3.setVolume(30);
-  // test: play track 1
-  dfmp3.playMp3FolderTrack(1); // sd:/mp3/0001.mp3
+  // play lightsaber on sound effect
+  dfmp3.playMp3FolderTrack(1);
 
-  // init IMU
+  // --- init IMU ---
   Wire.begin();                       
   mpu.initialize();
   
@@ -249,14 +253,14 @@ void setup() {
   }
 
 #if ENABLE_NETWORKING
-  // init MQTT
+  // --- init MQTT ---
   mqttClient.onConnect(on_mqtt_connected);
   mqttClient.onDisconnect(on_mqtt_disconnected);
   mqttClient.setServer(MQTT_HOST, MQTT_PORT);
   mqttClient.setCredentials(MQTT_LOGIN, MQTT_PASSWORD);
   mqttClient.setClientId(MQTT_CLIENT_ID);
 
-  // init Wi-Fi
+  // --- init WiFi ---
   WiFi.onEvent(on_wifi_connected, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_GOT_IP);
   WiFi.onEvent(on_wifi_disconnected, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
   // connect to wifi, which will then connect to mqtt
@@ -265,8 +269,6 @@ void setup() {
 }
 
 void loop() {
-  unsigned long current_time = millis();
-
   // check button events
   btn1.tick();
   btn2.tick();
@@ -281,6 +283,7 @@ void loop() {
     // Read FIFO packet
     uint16_t fifoCount = mpu.getFIFOCount();
     if (fifoCount == 1024) {
+      Serial.println("[DEBUG] MPU6050 FIFO Overflow!");
       mpu.resetFIFO();  // FIFO overflow, reset
       return;
     }
@@ -318,6 +321,7 @@ void loop() {
   }
 }
 
+// --- OneButton events ---
 void btn1_pressed() {
   Serial.println(F("[DEBUG] Button 1 pressed!"));
 
@@ -339,4 +343,12 @@ void btn2_pressed() {
   Serial.println(F("[DEBUG] Button 2 pressed!"));
 
   lightsaber_toggle_blink();
+}
+
+void btn1_released() {
+  Serial.println(F("[DEBUG] Button 1 released!"));
+}
+
+void btn2_released() {
+  Serial.println(F("[DEBUG] Button 2 released!"));
 }
