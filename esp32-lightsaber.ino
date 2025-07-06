@@ -6,6 +6,8 @@
 #include <Wire.h>
 #include <I2Cdev.h>
 #include <MPU6050_6Axis_MotionApps612.h>
+#include <ArduinoJson.h>
+#include <vector>
 
 // --- debug options ---
 #define ENABLE_NETWORKING 0
@@ -27,23 +29,22 @@ const char* WIFI_PASSWORD = "2022-11-07";
 
 // --- MQTT ---
 AsyncMqttClient mqttClient;
-const char* MQTT_HOST          = "192.168.0.100";
-const uint16_t MQTT_PORT       = 1883;
-const char* MQTT_CLIENT_ID     = "ESP32_Lightsaber";
-const char* MQTT_LOGIN         = "mqttuser";
-const char* MQTT_PASSWORD      = "1234";
-const char* MQTT_TOPIC_GESTURE = "esp32/saber/gesture";
+const char* MQTT_HOST      = "192.168.0.100";
+const uint16_t MQTT_PORT   = 1883;
+const char* MQTT_CLIENT_ID = "ESP32_Lightsaber";
+const char* MQTT_LOGIN     = "mqttuser";
+const char* MQTT_PASSWORD  = "1234";
+const char* MQTT_TOPIC_POST_NEW_GESTURE     = "sabre/comando";
+const char* MQTT_TOPIC_GET_GESTURES         = "sabre/comando/gesto";
+const char* MQTT_TOPIC_POST_GESTURE_SUCCESS = "sabre/comando/feito";
 
 // --- DFPlayer Mini ---
 #define DFPLAYER_RX_PIN 26
 #define DFPLAYER_TX_PIN 27
 HardwareSerial mp3Serial(2);
 class Mp3Notify;
-typedef DFMiniMp3<HardwareSerial, Mp3Notify> DfMp3; 
+typedef DFMiniMp3<HardwareSerial, Mp3Notify> DfMp3;
 DfMp3 dfmp3(mp3Serial);
-
-// --- Tasks ---
-TaskHandle_t blink_task_handler = nullptr;
 
 // --- MPU6050 IMU + DMP Config ---
 #define IMU_INT_PIN 25
@@ -67,23 +68,33 @@ const int16_t GESTURE_THRESHOLD = 8000;  // ~0.5g threshold (tune as needed)
 const int GESTURE_DEBOUNCE_MS = 300; // ignore motion interrupts for 300ms after detection
 unsigned long lastGestureTime = 0;
 
-// DFPlayer Mini event handlers
+// --- gesture ---
+const char* GESTURE_FORWARD  = "forward";
+const char* GESTURE_BACKWARD = "backward";
+const char* GESTURE_UP       = "up";
+const char* GESTURE_DOWN     = "down";
+const char* GESTURE_LEFT     = "left";
+const char* GESTURE_RIGHT    = "right";
+bool recordingNewGesture = false;
+std::vector<String> gestureBuffer;
+
+// DFPlayer Mini event handlers class
 class Mp3Notify
 {
 public:
   static void PrintlnSourceAction(DfMp3_PlaySources source, const char* action)
   {
-    if (source & DfMp3_PlaySources_Sd) 
+    if (source & DfMp3_PlaySources_Sd)
     {
-        Serial.print(F("[DEBUG] DFPlayer SD Card, "));
+      Serial.print(F("[DEBUG] DFPlayer SD Card, "));
     }
     if (source & DfMp3_PlaySources_Usb) 
     {
-        Serial.print(F("[DEBUG] DFPlayer USB Disk, "));
+      Serial.print(F("[DEBUG] DFPlayer USB Disk, "));
     }
     if (source & DfMp3_PlaySources_Flash) 
     {
-        Serial.print(F("[DEBUG] DFPlayer Flash, "));
+      Serial.print(F("[DEBUG] DFPlayer Flash, "));
     }
     Serial.println(action);
   }
@@ -112,65 +123,18 @@ public:
   }
 };
 
-void lightsaber_on_off_anim_task(void*) {
+void lightsaber_on_anim_task(void*) {
   const TickType_t interval = pdMS_TO_TICKS(40);
-  const TickType_t holdTime = pdMS_TO_TICKS(200);
 
-  // up
+  // slowly turn leds on, bottom to top
   for (int i = 0; i < NUM_LEDS; i++) {
-    leds[i] = CRGB::Red;
-    FastLED.show();
-    vTaskDelay(interval);
-  }
-
-  // wait
-  vTaskDelay(holdTime);
-
-  // down
-  for (int i = NUM_LEDS - 1; i >= 0; i--) {
-    leds[i] = CRGB::Black;
+    leds[i] = CRGB::Blue;
     FastLED.show();
     vTaskDelay(interval);
   }
 
   // end task
   vTaskDelete(nullptr);
-}
-
-void lightsaber_blink_anim_task(void*) {
-  const TickType_t onTime  = pdMS_TO_TICKS(200);
-  const TickType_t offTime = pdMS_TO_TICKS(200);
-
-  while(true) {
-    // all on
-    fill_solid(leds, NUM_LEDS, CRGB::Green);
-    FastLED.show();
-    vTaskDelay(onTime);
-
-    // all off
-    FastLED.clear(true);
-    vTaskDelay(offTime);
-  }
-}
-
-void lightsaber_toggle_blink() {
-  if (blink_task_handler) {
-    vTaskDelete(blink_task_handler);
-    blink_task_handler = nullptr;
-
-    // turn off leds
-    FastLED.clear(true);
-  } else {
-    xTaskCreatePinnedToCore(
-      lightsaber_blink_anim_task,
-      "BlinkAnimation",
-      2048,
-      nullptr,
-      tskIDLE_PRIORITY + 1,
-      &blink_task_handler,
-      0
-    );
-  }
 }
 
 // --- WiFi events ---
@@ -193,13 +157,6 @@ void on_mqtt_disconnected(AsyncMqttClientDisconnectReason reason) {
   Serial.print(F("[DEBUG] MQTT disconnected, retrying.."));
 
   mqttClient.connect();
-}
-
-// max evt 64 chars!
-void publish_event(const char* topic, const char* evt) {
-  char buf[64];
-  snprintf(buf, sizeof(buf), "{\"event\":\"%s\",\"ts\":%lu}", evt, millis());
-  mqttClient.publish(topic, 1, false, buf);
 }
 
 void setup() {
@@ -227,8 +184,17 @@ void setup() {
   delay(300);
   dfmp3.setVolume(30);
 
-  // play lightsaber on sound effect
-  if (millis() > 10000UL) dfmp3.playMp3FolderTrack(1);
+  // play lightsaber "on" sound and animation
+  dfmp3.playMp3FolderTrack(1);
+  xTaskCreatePinnedToCore(
+    lightsaber_on_anim_task,
+    "LightsaberOnAnimation",
+    2048,
+    nullptr,
+    tskIDLE_PRIORITY + 1,
+    nullptr,
+    0
+  );
 
   // --- init IMU ---
   Wire.begin();                       
@@ -315,15 +281,19 @@ void loop() {
 
         String gesture;
         if (abs(ax) >= abs(ay) && abs(ax) >= abs(az)) {
-          gesture = (ax > 0 ? "Forward" : "Backward");
+          gesture = (ax > 0 ? GESTURE_FORWARD : GESTURE_BACKWARD);
         } else if (abs(ay) >= abs(ax) && abs(ay) >= abs(az)) {
-          gesture = (ay > 0 ? "Right" : "Left");
+          gesture = (ay > 0 ? GESTURE_RIGHT : GESTURE_LEFT);
         } else {
-          gesture = (az > 0 ? "Up" : "Down");
+          gesture = (az > 0 ? GESTURE_UP : GESTURE_DOWN);
         }
 
         Serial.println(String("Gesture detected: ") + gesture);
         lastGestureTime = now;
+
+        if (recordingNewGesture) {
+          gestureBuffer.push_back(gesture);
+        }
       }
     }
   }
@@ -333,28 +303,39 @@ void loop() {
 void btn1_pressed() {
   Serial.println(F("[DEBUG] Button 1 pressed!"));
 
-  xTaskCreatePinnedToCore(
-    lightsaber_on_off_anim_task,
-    "OnOffAnimation",
-    2048,
-    nullptr,
-    tskIDLE_PRIORITY + 1,
-    nullptr,
-    0
-  );
-
-  // test example
-  //publish_event(MQTT_TOPIC_GESTURE, "gesture-kitchen-lights");
+  recordingNewGesture = true;
+  gestureBuffer.clear();
 }
 
 void btn2_pressed() {
   Serial.println(F("[DEBUG] Button 2 pressed!"));
-
-  lightsaber_toggle_blink();
 }
 
 void btn1_released() {
   Serial.println(F("[DEBUG] Button 1 released!"));
+
+  recordingNewGesture = false;
+
+  // ignore if no gestures
+  if (gestureBuffer.empty()) return;
+
+  // build payload JSON
+  StaticJsonDocument<256> doc;
+  JsonArray arr = doc.to<JsonArray>();
+  for (const String& g : gestureBuffer) arr.add(g);
+  String payload;
+  serializeJson(arr, payload);
+
+  Serial.print(F("[DEBUG] Sending gesture list: "));
+  Serial.println(payload);
+
+#if ENABLE_NETWORKING
+  mqttClient.publish(MQTT_TOPIC_POST_NEW_GESTURE,
+                    1, // QoS 1
+                    false,
+                    payload.c_str(),
+                    payload.length());
+#endif
 }
 
 void btn2_released() {

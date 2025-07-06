@@ -10,7 +10,7 @@
 - **FastLED** by Daniel Garcia
 - **MPU6050** by Electronic Cats
 - **DFPlayer Mini Mp3 by Makuna** by Michael C. Miller
-- **ArduinoJon** by Benoit Blanchon
+- **ArduinoJson** by Benoit Blanchon
 
 ### Import zip library
 
