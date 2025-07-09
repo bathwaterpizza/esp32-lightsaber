@@ -11,11 +11,15 @@
 #include <LittleFS.h>
 
 // --- debug options ---
-#define ENABLE_NETWORKING 0
+#define ENABLE_NETWORKING 1
+#define ENABLE_LEDS 1
+#define ENABLE_DFPLAYER 0
+#define ENABLE_BUTTONS 1
+#define ENABLE_IMU 1
 
 // --- LED strip ---
-#define NUM_LEDS 20
-#define LED_DATA_PIN 18
+#define NUM_LEDS 19
+#define LED_DATA_PIN 23
 CRGB leds[NUM_LEDS];
 
 // --- buttons ---
@@ -25,12 +29,12 @@ OneButton btn1;
 OneButton btn2;
 
 // --- WiFi credentials ---
-const char* WIFI_SSID     = "Peres";
-const char* WIFI_PASSWORD = "pan13DKs48";
+const char* WIFI_SSID     = "Projeto";
+const char* WIFI_PASSWORD = "2022-11-07";
 
 // --- MQTT ---
 AsyncMqttClient mqttClient;
-const char* MQTT_HOST      = "broker.mqtt.cool";
+const char* MQTT_HOST      = "192.168.0.136";
 const uint16_t MQTT_PORT   = 1883;
 const char* MQTT_CLIENT_ID = "ESP32_Lightsaber";
 const char* MQTT_LOGIN     = "mqttuser";
@@ -198,18 +202,23 @@ void on_mqtt_data(char* topic, char* payload,
 void setup() {
   Serial.begin(115200);
 
+#if ENABLE_NETWORKING
   // --- init LittleFS ---
   if (!LittleFS.begin()) {
     Serial.println(F("[DEBUG] LittleFS mount failed, formatting…"));
     LittleFS.format();
     LittleFS.begin();
   }
+#endif
 
+#if ENABLE_LEDS
   // --- init LED strip ---
   FastLED.addLeds<WS2812B, LED_DATA_PIN, GRB>(leds, NUM_LEDS);
   FastLED.setBrightness(255);
   //FastLED.setMaxPowerInVoltsAndMilliamps(5, 500); // breadboard safe
+#endif
 
+#if ENABLE_BUTTONS
   // --- init buttons ---
   btn1.setup(BTN1_PIN, INPUT, false);
   btn2.setup(BTN2_PIN, INPUT, false);
@@ -219,7 +228,9 @@ void setup() {
   btn2.attachLongPressStart(btn2_pressed);
   btn1.attachLongPressStop(btn1_released);
   btn2.attachLongPressStop(btn2_released);
+#endif
 
+#if ENABLE_DFPLAYER
   // --- init DFPlayer Mini ---
   mp3Serial.begin(9600, SERIAL_8N1, DFPLAYER_RX_PIN, DFPLAYER_TX_PIN);
   dfmp3.begin(); // RX, TX
@@ -229,16 +240,20 @@ void setup() {
 
   // play lightsaber "on" sound and animation
   dfmp3.playMp3FolderTrack(1);
+#endif
+#if ENABLE_LEDS
   xTaskCreatePinnedToCore(
     lightsaber_on_anim_task,
     "LightsaberOnAnimation",
-    2048,
+    4096,
     nullptr,
     tskIDLE_PRIORITY + 1,
     nullptr,
     0
   );
+#endif
 
+#if ENABLE_IMU
   // --- init MPU6050 IMU + DMP ---
   Wire.begin();                       
   mpu.initialize();
@@ -262,6 +277,7 @@ void setup() {
   } else {
     Serial.print(F("[DEBUG] DMP init failed (code ")); Serial.print(devStatus); Serial.println(F(")"));
   }
+#endif
 
 #if ENABLE_NETWORKING
   // --- init MQTT ---
@@ -281,13 +297,18 @@ void setup() {
 }
 
 void loop() {
+#if ENABLE_BUTTONS
   // check button events
   btn1.tick();
   btn2.tick();
+#endif
 
+#if ENABLE_DFPLAYER
   // check DFPlayer Mini events
   dfmp3.loop();
+#endif
 
+#if ENABLE_IMU
   // check IMU interrupt
   if (!dmpReady) return;  // skip IMU reading if DMP failed to init
   if (mpuInterrupt) {
@@ -321,8 +342,10 @@ void loop() {
 
     if (now - lastGestureTime > GESTURE_DEBOUNCE_MS) {  // gesture cooldown time
       if (abs(ax) > GESTURE_THRESHOLD || abs(ay) > GESTURE_THRESHOLD || abs(az) > GESTURE_THRESHOLD) {
+#if ENABLE_DFPLAYER
         // play random lightsaber swing sound effect
         if (recordingNewGesture) dfmp3.playMp3FolderTrack(random(2, 6));
+#endif
 
         String gesture;
         if (abs(ax) >= abs(ay) && abs(ax) >= abs(az)) {
@@ -342,6 +365,7 @@ void loop() {
       }
     }
   }
+#endif
 }
 
 // read /data.json from LittleFS and print to Serial
@@ -386,8 +410,10 @@ void btn1_pressed() {
 void btn2_pressed() {
   Serial.println(F("[DEBUG] Button 2 pressed!"));
 
+#if ENABLE_NETWORKING
   // debug
   debug_print_stored_gestures();
+#endif
 }
 
 void btn1_released() {
