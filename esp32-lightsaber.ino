@@ -9,6 +9,12 @@
 #include <ArduinoJson.h>
 #include <vector>
 #include <LittleFS.h>
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include <WebSerial.h>
+
+// debug web server
+AsyncWebServer webServer(80);
 
 // --- debug options ---
 #define ENABLE_NETWORKING 1
@@ -69,8 +75,8 @@ VectorInt16 aa, aaReal, aaWorld;
 VectorFloat gravity;
 
 // Gesture detection parameters
-const int16_t GESTURE_THRESHOLD = 8000;  // ~0.5g threshold (tune as needed)
-const int GESTURE_DEBOUNCE_MS = 300; // ignore motion interrupts for 300ms after detection
+const int16_t GESTURE_THRESHOLD = 10000;  // ~0.5g threshold (tune as needed)
+const int GESTURE_DEBOUNCE_MS = 400; // ignore motion interrupts for 300ms after detection
 unsigned long lastGestureTime = 0;
 
 // --- gesture ---
@@ -217,6 +223,17 @@ void on_wifi_connected(WiFiEvent_t, WiFiEventInfo_t) {
   Serial.println(F("[DEBUG] WiFi connected"));
 
   mqttClient.connect();
+
+  // print the IP so you know where to point your browser:
+  Serial.print  (F("[DEBUG] IP address: "));
+  Serial.println(WiFi.localIP());
+
+  // start WebSerial now that we have an IP
+  webServer.begin();
+  WebSerial.begin(&webServer);
+  Serial.print  (F("[DEBUG] WebSerial at http://"));
+  Serial.print  (WiFi.localIP());
+  Serial.println(F("/webserial"));
 }
 void on_wifi_disconnected(WiFiEvent_t, WiFiEventInfo_t) {
   Serial.println(F("[DEBUG] WiFi disconnected, retrying.."));
@@ -431,6 +448,7 @@ void loop() {
         }
 
         Serial.println(String("Gesture detected: ") + gesture);
+        WebSerial.println(String("Gesture detected: ") + gesture);
         lastGestureTime = now;
 
         if (recordingNewGesture || checkingGesture) {
