@@ -13,7 +13,7 @@
 // --- debug options ---
 #define ENABLE_NETWORKING 1
 #define ENABLE_LEDS 1
-#define ENABLE_DFPLAYER 0
+#define ENABLE_DFPLAYER 1
 #define ENABLE_BUTTONS 1
 #define ENABLE_IMU 1
 
@@ -74,14 +74,20 @@ const int GESTURE_DEBOUNCE_MS = 300; // ignore motion interrupts for 300ms after
 unsigned long lastGestureTime = 0;
 
 // --- gesture ---
-const char* GESTURE_FORWARD  = "forward";
-const char* GESTURE_BACKWARD = "backward";
-const char* GESTURE_UP       = "up";
-const char* GESTURE_DOWN     = "down";
-const char* GESTURE_LEFT     = "left";
-const char* GESTURE_RIGHT    = "right";
+const char* GESTURE_FORWARD  = "F";
+const char* GESTURE_BACKWARD = "T";
+const char* GESTURE_UP       = "C";
+const char* GESTURE_DOWN     = "B";
+const char* GESTURE_LEFT     = "E";
+const char* GESTURE_RIGHT    = "D";
 bool recordingNewGesture = false;
+bool checkingGesture = false;
 std::vector<String> gestureBuffer;
+// struct to pass color param to tasks
+struct StrobeParams {
+  CRGB swingColor;
+};
+TaskHandle_t currentLedTask = nullptr;
 
 // DFPlayer Mini event handlers class
 class Mp3Notify
@@ -150,8 +156,24 @@ bool save_gestures_to_flash(const uint8_t* payload, size_t len) {
   return true;
 }
 
+// color lookup
+CRGB color_from_name(const char* name) {
+  if      (!strcasecmp(name, "vermelho")) return CRGB::Red;
+  else if (!strcasecmp(name, "verde"))    return CRGB::Green;
+  else if (!strcasecmp(name, "amarelo"))  return CRGB::Yellow;
+  else if (!strcasecmp(name, "branco"))   return CRGB::White;
+  else if (!strcasecmp(name, "roxo"))     return CRGB::Purple;
+  else if (!strcasecmp(name, "azul"))     return CRGB::Blue;
+  else if (!strcasecmp(name, "laranja"))  return CRGB::Orange;
+  else                                    return CRGB::Blue;
+}
+
+// --- freertos tasks ---
 void lightsaber_on_anim_task(void*) {
   const TickType_t interval = pdMS_TO_TICKS(40);
+
+  // wait 1s for DFPlayer "lightsaber on" sound
+  vTaskDelay(pdMS_TO_TICKS(1000));
 
   // slowly turn leds on, bottom to top
   for (int i = 0; i < NUM_LEDS; i++) {
@@ -161,6 +183,32 @@ void lightsaber_on_anim_task(void*) {
   }
 
   // end task
+  vTaskDelete(nullptr);
+}
+
+void lightsaber_swing_strobe_task(void* pv) {
+  // retrieve color param
+  StrobeParams* p = static_cast<StrobeParams*>(pv);
+  const CRGB swingCol = p->swingColor;
+  delete p;
+
+  const TickType_t on  = pdMS_TO_TICKS(50);
+  const TickType_t off = pdMS_TO_TICKS(50);
+
+  for (uint8_t i = 0; i < 5; ++i) {
+    fill_solid(leds, NUM_LEDS, swingCol);
+    FastLED.show();
+    vTaskDelay(on);
+
+    FastLED.clear(true);
+    vTaskDelay(off);
+  }
+
+  // return to idle blue
+  fill_solid(leds, NUM_LEDS, CRGB::Blue);
+  FastLED.show();
+
+  currentLedTask = nullptr;
   vTaskDelete(nullptr);
 }
 
@@ -296,6 +344,28 @@ void setup() {
 #endif
 }
 
+void strobe_color(const char* color) {
+  // stop current animation
+  if (currentLedTask != nullptr) {
+    vTaskDelete(currentLedTask); // kill last task
+    currentLedTask = nullptr;
+    FastLED.clear(true);
+  }
+
+  // allocate color param
+  StrobeParams* param = new StrobeParams{ color_from_name(color) };
+
+  xTaskCreatePinnedToCore(
+    lightsaber_swing_strobe_task,          // task function
+    "SwingStrobe",            // name
+    4096,                     // stack words
+    param,                    // parameter
+    tskIDLE_PRIORITY + 1,     // priority
+    &currentLedTask,
+    0                         // pin to core 0
+  );
+}
+
 void loop() {
 #if ENABLE_BUTTONS
   // check button events
@@ -344,7 +414,11 @@ void loop() {
       if (abs(ax) > GESTURE_THRESHOLD || abs(ay) > GESTURE_THRESHOLD || abs(az) > GESTURE_THRESHOLD) {
 #if ENABLE_DFPLAYER
         // play random lightsaber swing sound effect
-        if (recordingNewGesture) dfmp3.playMp3FolderTrack(random(2, 6));
+        if (recordingNewGesture || checkingGesture) dfmp3.playMp3FolderTrack(random(2, 6));
+#endif
+
+#if ENABLE_LEDS
+        if (recordingNewGesture || checkingGesture) strobe_color("azul");
 #endif
 
         String gesture;
@@ -359,7 +433,7 @@ void loop() {
         Serial.println(String("Gesture detected: ") + gesture);
         lastGestureTime = now;
 
-        if (recordingNewGesture) {
+        if (recordingNewGesture || checkingGesture) {
           gestureBuffer.push_back(gesture);
         }
       }
@@ -410,6 +484,9 @@ void btn1_pressed() {
 void btn2_pressed() {
   Serial.println(F("[DEBUG] Button 2 pressed!"));
 
+  checkingGesture = true;
+  gestureBuffer.clear();
+
 #if ENABLE_NETWORKING
   // debug
   debug_print_stored_gestures();
@@ -445,4 +522,62 @@ void btn1_released() {
 
 void btn2_released() {
   Serial.println(F("[DEBUG] Button 2 released!"));
+
+  checkingGesture = false;
+
+  if (gestureBuffer.empty()) { // nothing recorded
+    strobe_color("vermelho");
+    return;
+  }
+
+  // ─── load gesture DB ─────────────────────────────────────────────
+  File f = LittleFS.open("/data.json", "r");
+  if (!f) { Serial.println(F("[DEBUG] /data.json open failed")); strobe_color("vermelho"); return; }
+
+  StaticJsonDocument<4096> doc;
+  if (deserializeJson(doc, f)) { f.close(); strobe_color("vermelho"); return; }
+  f.close();
+
+  // ─── search for a matching "gesto" list ─────────────────────────
+  const char* matchedColor = nullptr;
+  JsonArray*  matchedGesto = nullptr;
+
+  for (JsonObject obj : doc.as<JsonArray>()) {
+    JsonArray gestoArr = obj["gesto"];
+    if (gestoArr.size() != gestureBuffer.size()) continue;
+
+    bool same = true;
+    for (size_t i = 0; i < gestoArr.size(); ++i) {
+      if (gestureBuffer[i] != (const char*)gestoArr[i]) { same = false; break; }
+    }
+
+    if (same) {
+      matchedColor = obj["cor"];
+      matchedGesto = &gestoArr;
+      break;
+    }
+  }
+
+  // ─── act on result ──────────────────────────────────────────────
+  if (matchedGesto) {
+    Serial.println(F("[DEBUG] Gesture matched!"));
+
+    // LED feedback
+    strobe_color(matchedColor);
+
+#if ENABLE_NETWORKING
+    // publish the matched gesture list itself
+    StaticJsonDocument<256> out;
+    JsonArray outArr = out.to<JsonArray>();
+    for (JsonVariant v : *matchedGesto) outArr.add(v);
+
+    char buf[256];
+    size_t n = serializeJson(outArr, buf);
+
+    mqttClient.publish(MQTT_TOPIC_POST_GESTURE_SUCCESS, 1, false, buf, n);
+#endif
+  } else {
+    Serial.println(F("[DEBUG] No match - red strobe"));
+    strobe_color("vermelho");
+  }
 }
