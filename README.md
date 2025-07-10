@@ -10,7 +10,7 @@ This project is an ESP32-powered IoT "lightsaber" that uses motion gestures to c
 
 ![Assembly](assembly1.png)
 
-<video src='demo_video.mp4'/>
+<video src='demo_video.mp4' width=180/>
 
 ## Dependencies
 
