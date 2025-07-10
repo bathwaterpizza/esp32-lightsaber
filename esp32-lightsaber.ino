@@ -264,6 +264,142 @@ void on_mqtt_data(char* topic, char* payload,
   save_gestures_to_flash((uint8_t*)payload, len);
 }
 
+
+// debug function: read /data.json from LittleFS and print to Serial
+void debug_print_stored_gestures()
+{
+  if (!LittleFS.exists("/data.json")) {
+    Serial.println(F("[DEBUG] /data.json not found"));
+    return;
+  }
+
+  File f = LittleFS.open("/data.json", "r");
+  if (!f) {
+    Serial.println(F("[DEBUG] Failed to open /data.json"));
+    return;
+  }
+
+  // Use a sufficiently large document; 4 KB fits ~1200-byte JSON comfortably
+  StaticJsonDocument<4096> doc;
+  DeserializationError err = deserializeJson(doc, f);
+  f.close();
+
+  if (err) {
+    Serial.print  (F("[DEBUG] JSON parse error: "));
+    Serial.println(err.c_str());
+    return;
+  }
+
+  Serial.println(F("----- Stored gesture library -----"));
+  serializeJsonPretty(doc, Serial);          // nicely indented output
+  Serial.println();                          // final newline
+  Serial.println(F("-----------------------------------"));
+}
+
+// --- OneButton events ---
+void btn1_pressed() {
+  Serial.println(F("[DEBUG] Button 1 pressed!"));
+
+  recordingNewGesture = true;
+  gestureBuffer.clear();
+}
+
+void btn2_pressed() {
+  Serial.println(F("[DEBUG] Button 2 pressed!"));
+
+  checkingGesture = true;
+  gestureBuffer.clear();
+}
+
+void btn1_released() {
+  Serial.println(F("[DEBUG] Button 1 released!"));
+
+  recordingNewGesture = false;
+
+  // ignore if no gestures
+  if (gestureBuffer.empty()) return;
+
+  // build payload JSON
+  StaticJsonDocument<256> doc;
+  JsonArray arr = doc.to<JsonArray>();
+  for (const String& g : gestureBuffer) arr.add(g);
+  String payload;
+  serializeJson(arr, payload);
+
+  Serial.print(F("[DEBUG] Sending gesture list: "));
+  Serial.println(payload);
+
+#if ENABLE_NETWORKING
+  mqttClient.publish(MQTT_TOPIC_POST_NEW_GESTURE,
+                    1, // QoS 1
+                    false,
+                    payload.c_str(),
+                    payload.length());
+#endif
+}
+
+void btn2_released() {
+  Serial.println(F("[DEBUG] Button 2 released!"));
+
+  checkingGesture = false;
+
+  if (gestureBuffer.empty()) { // nothing recorded
+    strobe_color("vermelho");
+    return;
+  }
+
+  // load stored gestures
+  File f = LittleFS.open("/data.json", "r");
+  if (!f) { Serial.println(F("[DEBUG] /data.json open failed")); strobe_color("vermelho"); return; }
+
+  StaticJsonDocument<4096> doc;
+  if (deserializeJson(doc, f)) { f.close(); strobe_color("vermelho"); return; }
+  f.close();
+
+  // search for matching gesture list
+  const char* matchedColor = nullptr;
+  JsonArray*  matchedGesto = nullptr;
+
+  for (JsonObject obj : doc.as<JsonArray>()) {
+    JsonArray gestoArr = obj["gesto"];
+    if (gestoArr.size() != gestureBuffer.size()) continue;
+
+    bool same = true;
+    for (size_t i = 0; i < gestoArr.size(); ++i) {
+      if (gestureBuffer[i] != (const char*)gestoArr[i]) { same = false; break; }
+    }
+
+    if (same) {
+      matchedColor = obj["cor"];
+      matchedGesto = &gestoArr;
+      break;
+    }
+  }
+
+  // check match
+  if (matchedGesto) {
+    Serial.println(F("[DEBUG] Gesture matched!"));
+
+    // LED feedback
+    strobe_color(matchedColor);
+
+#if ENABLE_NETWORKING
+    // publish the matched gesture list itself
+    StaticJsonDocument<256> out;
+    JsonArray outArr = out.to<JsonArray>();
+    for (JsonVariant v : *matchedGesto) outArr.add(v);
+
+    char buf[256];
+    size_t n = serializeJson(outArr, buf);
+
+    mqttClient.publish(MQTT_TOPIC_POST_GESTURE_SUCCESS, 1, false, buf, n);
+#endif
+  } else {
+    Serial.println(F("[DEBUG] No match - red strobe"));
+    strobe_color("vermelho");
+  }
+}
+
 void setup() {
   Serial.begin(115200);
 
@@ -458,144 +594,4 @@ void loop() {
     }
   }
 #endif
-}
-
-// read /data.json from LittleFS and print to Serial
-void debug_print_stored_gestures()
-{
-  if (!LittleFS.exists("/data.json")) {
-    Serial.println(F("[DEBUG] /data.json not found"));
-    return;
-  }
-
-  File f = LittleFS.open("/data.json", "r");
-  if (!f) {
-    Serial.println(F("[DEBUG] Failed to open /data.json"));
-    return;
-  }
-
-  // Use a sufficiently large document; 4 KB fits ~1200-byte JSON comfortably
-  StaticJsonDocument<4096> doc;
-  DeserializationError err = deserializeJson(doc, f);
-  f.close();
-
-  if (err) {
-    Serial.print  (F("[DEBUG] JSON parse error: "));
-    Serial.println(err.c_str());
-    return;
-  }
-
-  Serial.println(F("----- Stored gesture library -----"));
-  serializeJsonPretty(doc, Serial);          // nicely indented output
-  Serial.println();                          // final newline
-  Serial.println(F("-----------------------------------"));
-}
-
-// --- OneButton events ---
-void btn1_pressed() {
-  Serial.println(F("[DEBUG] Button 1 pressed!"));
-
-  recordingNewGesture = true;
-  gestureBuffer.clear();
-}
-
-void btn2_pressed() {
-  Serial.println(F("[DEBUG] Button 2 pressed!"));
-
-  checkingGesture = true;
-  gestureBuffer.clear();
-
-#if ENABLE_NETWORKING
-  // debug
-  debug_print_stored_gestures();
-#endif
-}
-
-void btn1_released() {
-  Serial.println(F("[DEBUG] Button 1 released!"));
-
-  recordingNewGesture = false;
-
-  // ignore if no gestures
-  if (gestureBuffer.empty()) return;
-
-  // build payload JSON
-  StaticJsonDocument<256> doc;
-  JsonArray arr = doc.to<JsonArray>();
-  for (const String& g : gestureBuffer) arr.add(g);
-  String payload;
-  serializeJson(arr, payload);
-
-  Serial.print(F("[DEBUG] Sending gesture list: "));
-  Serial.println(payload);
-
-#if ENABLE_NETWORKING
-  mqttClient.publish(MQTT_TOPIC_POST_NEW_GESTURE,
-                    1, // QoS 1
-                    false,
-                    payload.c_str(),
-                    payload.length());
-#endif
-}
-
-void btn2_released() {
-  Serial.println(F("[DEBUG] Button 2 released!"));
-
-  checkingGesture = false;
-
-  if (gestureBuffer.empty()) { // nothing recorded
-    strobe_color("vermelho");
-    return;
-  }
-
-  // ─── load gesture DB ─────────────────────────────────────────────
-  File f = LittleFS.open("/data.json", "r");
-  if (!f) { Serial.println(F("[DEBUG] /data.json open failed")); strobe_color("vermelho"); return; }
-
-  StaticJsonDocument<4096> doc;
-  if (deserializeJson(doc, f)) { f.close(); strobe_color("vermelho"); return; }
-  f.close();
-
-  // ─── search for a matching "gesto" list ─────────────────────────
-  const char* matchedColor = nullptr;
-  JsonArray*  matchedGesto = nullptr;
-
-  for (JsonObject obj : doc.as<JsonArray>()) {
-    JsonArray gestoArr = obj["gesto"];
-    if (gestoArr.size() != gestureBuffer.size()) continue;
-
-    bool same = true;
-    for (size_t i = 0; i < gestoArr.size(); ++i) {
-      if (gestureBuffer[i] != (const char*)gestoArr[i]) { same = false; break; }
-    }
-
-    if (same) {
-      matchedColor = obj["cor"];
-      matchedGesto = &gestoArr;
-      break;
-    }
-  }
-
-  // ─── act on result ──────────────────────────────────────────────
-  if (matchedGesto) {
-    Serial.println(F("[DEBUG] Gesture matched!"));
-
-    // LED feedback
-    strobe_color(matchedColor);
-
-#if ENABLE_NETWORKING
-    // publish the matched gesture list itself
-    StaticJsonDocument<256> out;
-    JsonArray outArr = out.to<JsonArray>();
-    for (JsonVariant v : *matchedGesto) outArr.add(v);
-
-    char buf[256];
-    size_t n = serializeJson(outArr, buf);
-
-    mqttClient.publish(MQTT_TOPIC_POST_GESTURE_SUCCESS, 1, false, buf, n);
-#endif
-  } else {
-    Serial.println(F("[DEBUG] No match - red strobe"));
-    strobe_color("vermelho");
-  }
 }
