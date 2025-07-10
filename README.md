@@ -10,7 +10,7 @@ This project is an ESP32-powered IoT lightsaber that uses motion gestures to con
 
 ![assembly1](https://github.com/user-attachments/assets/081de856-7204-4479-b818-d8b53e6aa83b)
 
-Uploading demo_video.mp4…
+https://github.com/user-attachments/assets/079a164e-556b-488e-93ef-55aafcb9b48b
 
 ## Dependencies
 
